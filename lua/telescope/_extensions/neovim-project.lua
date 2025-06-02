@@ -65,7 +65,34 @@ local function create_finder(discover)
   })
 end
 
-local function change_working_directory(prompt_bufnr)
+local function worktree(dir)
+  local has_worktree, worktree = pcall(require, "git-worktree")
+  if not has_worktree then
+    return false
+  end
+
+  vim.fn.execute("lcd" .. " " .. dir, "silent")
+  local cwd = vim.fn.getcwd()
+
+  vim.fn.system("git rev-parse --is-inside-work-tree")
+  local inside_worktree = vim.v.shell_error == 0
+
+  if inside_worktree then
+    vim.schedule(function()
+       telescope.extensions.git_worktree.git_worktrees()
+    end)
+
+    worktree.on_tree_change(function(op, metadata)
+      if op == worktree.Operations.Switch then
+        project.switch_project(metadata.path)
+      end
+    end)
+  end
+
+  return inside_worktree
+end
+
+local function change_working_directory(prompt_bufnr, type)
   local selected_entry = state.get_selected_entry()
   if selected_entry == nil then
     actions.close(prompt_bufnr)
@@ -73,8 +100,14 @@ local function change_working_directory(prompt_bufnr)
   end
   local dir = selected_entry.value
   actions.close(prompt_bufnr)
-  -- session_manager will change session
-  project.switch_project(dir)
+
+  if type ~= "history" then
+    local is_worktree = worktree(dir, type)
+    if not is_worktree then
+      -- session_manager will change session
+      project.switch_project(dir)
+    end
+  end
 end
 
 local function delete_project(prompt_bufnr)
@@ -118,7 +151,7 @@ local function project_history(opts)
         end
 
         local on_project_selected = function()
-          change_working_directory(prompt_bufnr)
+          change_working_directory(prompt_bufnr, "history")
         end
         actions.select_default:replace(on_project_selected)
         return true
@@ -139,7 +172,7 @@ local function project_discover(opts)
       sorter = telescope_config.generic_sorter(opts),
       attach_mappings = function(prompt_bufnr)
         local on_project_selected = function()
-          change_working_directory(prompt_bufnr)
+          change_working_directory(prompt_bufnr, "discover")
         end
         actions.select_default:replace(on_project_selected)
         return true
